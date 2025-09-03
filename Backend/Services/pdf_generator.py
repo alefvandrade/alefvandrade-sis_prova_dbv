@@ -3,6 +3,8 @@ from fpdf import FPDF
 import fitz  # PyMuPDF para ler PDFs
 from Backend.Controllers.prova_controller import ProvaController
 from Backend.Controllers.questao_controller import QuestaoController
+from pdf2image import convert_from_path
+import pytesseract
 
 # -------------------- Função para gerar PDF da prova --------------------
 def gerar_doc_prova(prova_id):
@@ -48,4 +50,23 @@ def extrair_texto_pdf(caminho_pdf):
     for pagina in doc:
         texto += pagina.get_text()
     doc.close()
+    return texto
+
+def extrair_texto_pdf_ocr(caminho_pdf, idioma="por"):
+    """
+    Extrai texto de um PDF usando OCR (para PDFs escaneados ou imagens).
+    :param caminho_pdf: caminho do arquivo PDF
+    :param idioma: idioma do OCR (ex: 'por' para português)
+    :return: texto extraído como string
+    """
+    if not os.path.exists(caminho_pdf):
+        raise FileNotFoundError(f"PDF não encontrado: {caminho_pdf}")
+
+    texto = ""
+    # Converte cada página do PDF em imagem
+    paginas = convert_from_path(caminho_pdf)
+    for i, pagina in enumerate(paginas):
+        texto_pagina = pytesseract.image_to_string(pagina, lang=idioma)
+        texto += texto_pagina + "\n"
+
     return texto
