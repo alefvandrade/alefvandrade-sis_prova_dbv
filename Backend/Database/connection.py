@@ -5,14 +5,12 @@ class DatabaseConnection:
     def __init__(self, db_path="Data/sis_prova_dbv.sqlite"):
         self.db_path = db_path
         self.conn = None
-        self.cursor = None
 
-    # ----- Context Manager -----
+    # Context manager
     def __enter__(self):
         self.conn = sqlite3.connect(self.db_path)
-        self.conn.row_factory = sqlite3.Row  # retorna dicionários
-        self.cursor = self.conn.cursor()
-        return self.cursor  # retorna cursor para o 'with'
+        self.conn.row_factory = sqlite3.Row  # retorna linhas como dict
+        return self.conn  # retorna a conexão, não o cursor
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self.conn:
@@ -22,7 +20,7 @@ class DatabaseConnection:
                 self.conn.rollback()
             self.conn.close()
 
-    # ----- Métodos auxiliares (opcional) -----
+    # Métodos auxiliares opcionais
     def execute(self, query, params=()):
         with sqlite3.connect(self.db_path) as conn:
             cur = conn.cursor()

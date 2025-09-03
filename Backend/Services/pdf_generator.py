@@ -1,94 +1,51 @@
-# Backend/Services/pdf_generator.py
 import os
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
+from fpdf import FPDF
+import fitz  # PyMuPDF para ler PDFs
 from Backend.Controllers.prova_controller import ProvaController
-from Backend.Controllers.gabarito_controller import GabaritoController
+from Backend.Controllers.questao_controller import QuestaoController
 
-OUTPUT_FOLDER = "Data/Output"
-
-def gerar_doc_prova(prova_id: int, incluir_gabarito: bool = False) -> str:
-    """
-    Gera o PDF da prova com todas as questões.
-    Se incluir_gabarito=True, adiciona o gabarito no final.
-    Retorna o caminho do arquivo PDF.
-    """
-    # Buscar prova e questões
+# -------------------- Função para gerar PDF da prova --------------------
+def gerar_doc_prova(prova_id):
     prova = ProvaController.buscar_prova(prova_id)
-    questoes = ProvaController.listar_questoes(prova_id)
+    if not prova:
+        raise ValueError(f"Prova com ID {prova_id} não encontrada.")
 
-    if not os.path.exists(OUTPUT_FOLDER):
-        os.makedirs(OUTPUT_FOLDER)
+    questoes = QuestaoController.listar_questoes_por_prova(prova_id)
+    if not questoes:
+        raise ValueError("Nenhuma questão associada à prova.")
 
-    arquivo_pdf = os.path.join(OUTPUT_FOLDER, f"prova_{prova_id}.pdf")
-    c = canvas.Canvas(arquivo_pdf, pagesize=A4)
-    largura, altura = A4
-    y = altura - 50
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, f"Prova: {prova.nome}", ln=True, align="C")
+    pdf.ln(10)
 
-    # Título da prova
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, y, f"Prova ID: {prova.id}")
-    y -= 30
-    c.setFont("Helvetica", 12)
-    c.drawString(50, y, f"Especialidade: {prova.especialidade_id}")
-    y -= 30
-
-    # Inserir questões
-    for idx, q in enumerate(questoes, start=1):
-        c.setFont("Helvetica-Bold", 12)
-        enunciado = f"{idx}. {q.enunciado}"
-        y = escrever_texto(c, enunciado, y)
-        
-        # Questão múltipla
+    for i, q in enumerate(questoes, 1):
+        pdf.set_font("Arial", "", 12)
+        pdf.multi_cell(0, 8, f"{i}. {q.enunciado}")
         if hasattr(q, "alternativas") and q.alternativas:
-            for alt in q.alternativas:
-                y = escrever_texto(c, f"   {alt}", y)
-        
-        # Questão prática
-        if hasattr(q, "gerar_campo_assinatura"):
-            assinatura = q.gerar_campo_assinatura()
-            y = escrever_texto(c, assinatura, y)
+            for letra, alt in zip(["A", "B", "C", "D", "E"], q.alternativas):
+                pdf.multi_cell(0, 8, f"   {letra}) {alt}")
+        pdf.ln(5)
 
-        y -= 20
-        if y < 100:
-            c.showPage()
-            y = altura - 50
+    output_path = os.path.join("Data", "Output", f"{prova.nome}.pdf")
+    pdf.output(output_path)
+    prova.arquivo_pdf = output_path
+    ProvaController.atualizar_arquivo(prova_id, output_path)
+    return output_path
 
-    # Incluir gabarito se necessário
-    if incluir_gabarito:
-        c.showPage()
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(50, altura - 50, "Gabarito")
-        y = altura - 80
-
-        gabarito = GabaritoController.gerar_gabarito(prova_id)
-        for idx, item in enumerate(gabarito.itens, start=1):
-            enun, resp = item[1], item[2]
-            y = escrever_texto(c, f"{idx}. {enun}\nResposta: {resp}", y)
-            y -= 10
-            if y < 100:
-                c.showPage()
-                y = altura - 50
-
-    c.save()
-    return arquivo_pdf
-
-
-def escrever_texto(canvas_obj, texto: str, y: float, margem_esq: int = 50, linha_altura: int = 15) -> float:
+# -------------------- Função para extrair texto de PDF --------------------
+def extrair_texto_pdf(caminho_pdf):
     """
-    Escreve texto no PDF, quebrando em linhas se necessário.
+    Lê um PDF e retorna todo o texto contido nele como uma string.
     """
-    largura_max = 500
-    palavras = texto.split()
-    linha = ""
-    for palavra in palavras:
-        if canvas_obj.stringWidth(linha + " " + palavra) < largura_max:
-            linha += " " + palavra
-        else:
-            canvas_obj.drawString(margem_esq, y, linha.strip())
-            y -= linha_altura
-            linha = palavra
-    if linha:
-        canvas_obj.drawString(margem_esq, y, linha.strip())
-        y -= linha_altura
-    return y
+    if not os.path.exists(caminho_pdf):
+        raise FileNotFoundError(f"PDF não encontrado: {caminho_pdf}")
+
+    texto = ""
+    doc = fitz.open(caminho_pdf)
+    for pagina in doc:
+        texto += pagina.get_text()
+    doc.close()
+    return texto

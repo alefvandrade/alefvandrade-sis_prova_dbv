@@ -1,154 +1,166 @@
-# Frontend/painel_gui.py
 import sys
-import os
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QPushButton, QLabel,
-    QFileDialog, QInputDialog, QListWidget, QMessageBox
+    QApplication, QWidget, QPushButton, QVBoxLayout, QLabel,
+    QTableWidget, QTableWidgetItem, QComboBox, QSpinBox, QDialog,
+    QProgressBar, QFileDialog
 )
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
 from Backend.Controllers.usuario_controller import UsuarioController
 from Backend.Controllers.especialidade_controller import EspecialidadeController
-from Backend.Services.pdf_service import extrair_texto_pdf
 from Backend.Services.questao_service import gerar_questoes_do_texto
 from Backend.Services.prova_service import gerar_prova_completa
+from Backend.Services.pdf_generator import extrair_texto_pdf
 
-PDF_INPUT_FOLDER = "Data/Input"
+# -------------------- Janela de Tabela --------------------
+class TabelaDialog(QDialog):
+    def __init__(self, titulo, dados, colunas):
+        super().__init__()
+        self.setWindowTitle(titulo)
+        self.resize(600, 400)
+        layout = QVBoxLayout()
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(colunas))
+        self.table.setHorizontalHeaderLabels(colunas)
+        self.table.setRowCount(len(dados))
 
+        for i, linha in enumerate(dados):
+            for j, valor in enumerate(linha):
+                self.table.setItem(i, j, QTableWidgetItem(str(valor)))
+
+        layout.addWidget(self.table)
+        self.setLayout(layout)
+
+# -------------------- Thread de Geração --------------------
+class GerarQuestaoThread(QThread):
+    terminado = pyqtSignal(list)
+
+    def __init__(self, especialidade_id, texto, tipo, qtd):
+        super().__init__()
+        self.especialidade_id = especialidade_id
+        self.texto = texto
+        self.tipo = tipo
+        self.qtd = qtd
+
+    def run(self):
+        questoes = gerar_questoes_do_texto(self.especialidade_id, self.texto, self.tipo, self.qtd)
+        self.terminado.emit(questoes)
+
+# -------------------- Janela Principal --------------------
 class PainelGUI(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Painel Sistema de Provas")
-        self.setGeometry(100, 100, 600, 400)
+        self.setWindowTitle("Sistema de Provas")
+        self.resize(700, 600)
         layout = QVBoxLayout()
 
-        self.label = QLabel("Selecione uma ação:")
-        layout.addWidget(self.label)
+        # -------------------- Botões Usuários --------------------
+        self.btn_usuarios = QPushButton("Listar Usuários")
+        self.btn_usuarios.clicked.connect(self.listar_usuarios)
+        layout.addWidget(self.btn_usuarios)
 
-        # Botões
-        botoes = [
-            ("Cadastrar Usuário", self.cadastrar_usuario),
-            ("Listar Usuários", self.listar_usuarios),
-            ("Cadastrar Especialidade", self.cadastrar_especialidade),
-            ("Listar Especialidades", self.listar_especialidades),
-            ("Enviar PDF", self.enviar_pdf),
-            ("Listar PDFs Disponíveis", self.listar_pdfs),
-            ("Gerar Prova a partir de PDF", self.gerar_prova)
-        ]
+        self.btn_especialidades = QPushButton("Listar Especialidades")
+        self.btn_especialidades.clicked.connect(self.listar_especialidades)
+        layout.addWidget(self.btn_especialidades)
 
-        for nome, func in botoes:
-            btn = QPushButton(nome)
-            btn.clicked.connect(func)
-            layout.addWidget(btn)
+        # -------------------- Seleção de PDF --------------------
+        self.btn_pdf = QPushButton("Selecionar PDF")
+        self.btn_pdf.clicked.connect(self.selecionar_pdf)
+        layout.addWidget(self.btn_pdf)
+
+        self.caminho_pdf_label = QLabel("Nenhum PDF selecionado")
+        layout.addWidget(self.caminho_pdf_label)
+
+        # -------------------- Configuração da Prova --------------------
+        layout.addWidget(QLabel("Tipo de questão:"))
+        self.tipo_combo = QComboBox()
+        self.tipo_combo.addItems(["multipla", "dissertativa", "pratica"])
+        layout.addWidget(self.tipo_combo)
+
+        layout.addWidget(QLabel("Quantidade de questões:"))
+        self.qtd_spin = QSpinBox()
+        self.qtd_spin.setMinimum(1)
+        self.qtd_spin.setMaximum(20)
+        layout.addWidget(self.qtd_spin)
+
+        layout.addWidget(QLabel("Especialidade:"))
+        self.especialidade_combo = QComboBox()
+        self.atualizar_combo_especialidades()
+        layout.addWidget(self.especialidade_combo)
+
+        self.btn_gerar = QPushButton("Gerar Prova")
+        self.btn_gerar.clicked.connect(self.gerar_prova)
+        layout.addWidget(self.btn_gerar)
 
         self.setLayout(layout)
 
-    # ---------------------------
-    # Funções de cada botão
-    # ---------------------------
-    def cadastrar_usuario(self):
-        nome, ok = QInputDialog.getText(self, "Cadastrar Usuário", "Nome:")
-        if not ok or not nome:
-            return
-        email, ok = QInputDialog.getText(self, "Cadastrar Usuário", "Email:")
-        if not ok or not email:
-            return
-        senha, ok = QInputDialog.getText(self, "Cadastrar Usuário", "Senha:")
-        if not ok or not senha:
-            return
-        usuario = UsuarioController.criar_usuario(nome, email, senha)
-        QMessageBox.information(self, "Sucesso", f"Usuário cadastrado: ID {usuario.id}")
-
+    # -------------------- Funções --------------------
     def listar_usuarios(self):
-        usuarios = UsuarioController.listar_usuarios()
-        msg = "\n".join([f"{u.id} - {u.nome} ({u.email})" for u in usuarios])
-        QMessageBox.information(self, "Usuários", msg or "Nenhum usuário cadastrado.")
-
-    def cadastrar_especialidade(self):
-        codigo, ok = QInputDialog.getText(self, "Cadastrar Especialidade", "Código:")
-        if not ok or not codigo:
-            return
-        nome, ok = QInputDialog.getText(self, "Cadastrar Especialidade", "Nome:")
-        if not ok or not nome:
-            return
-        esp = EspecialidadeController.criar_especialidade(codigo, nome)
-        QMessageBox.information(self, "Sucesso", f"Especialidade cadastrada: ID {esp.id}")
+        dados = []
+        for u in UsuarioController.listar_usuarios():
+            dados.append([u.id, u.nome, u.email, u.criado_em])
+        dialog = TabelaDialog("Usuários", dados, ["ID", "Nome", "Email", "Criado em"])
+        dialog.exec_()
 
     def listar_especialidades(self):
-        especialidades = EspecialidadeController.listar_especialidades()
-        msg = "\n".join([f"{e.id} - {e.nome} ({e.codigo})" for e in especialidades])
-        QMessageBox.information(self, "Especialidades", msg or "Nenhuma especialidade cadastrada.")
+        dados = []
+        for e in EspecialidadeController.listar_especialidades():
+            dados.append([e.id, e.codigo, e.nome, e.criado_em])
+        dialog = TabelaDialog("Especialidades", dados, ["ID", "Código", "Nome", "Criado em"])
+        dialog.exec_()
 
-    def enviar_pdf(self):
-        if not os.path.exists(PDF_INPUT_FOLDER):
-            os.makedirs(PDF_INPUT_FOLDER)
-        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar PDF", "", "PDF Files (*.pdf)")
-        if not file_path:
-            return
-        destino = os.path.join(PDF_INPUT_FOLDER, os.path.basename(file_path))
-        with open(file_path, "rb") as src, open(destino, "wb") as dst:
-            dst.write(src.read())
-        QMessageBox.information(self, "Sucesso", f"PDF enviado para {destino}")
+    def atualizar_combo_especialidades(self):
+        self.especialidade_combo.clear()
+        for e in EspecialidadeController.listar_especialidades():
+            self.especialidade_combo.addItem(f"{e.nome} ({e.id})", e.id)
 
-    def listar_pdfs(self):
-        arquivos = [f for f in os.listdir(PDF_INPUT_FOLDER) if f.endswith(".pdf")]
-        msg = "\n".join(arquivos)
-        QMessageBox.information(self, "PDFs Disponíveis", msg or "Nenhum PDF disponível.")
+    def selecionar_pdf(self):
+        caminho, _ = QFileDialog.getOpenFileName(self, "Selecione o PDF", "Data/Input/", "PDF Files (*.pdf)")
+        if caminho:
+            self.caminho_pdf_label.setText(caminho)
+            self.texto_extraido = extrair_texto_pdf(caminho)
+            print("[LOG] PDF carregado e texto extraído.")
 
     def gerar_prova(self):
-        # Selecionar usuário
-        usuarios = UsuarioController.listar_usuarios()
-        if not usuarios:
-            QMessageBox.warning(self, "Aviso", "Nenhum usuário cadastrado.")
-            return
-        items = [f"{u.id} - {u.nome}" for u in usuarios]
-        item, ok = QInputDialog.getItem(self, "Selecionar Usuário", "Usuário:", items, 0, False)
-        if not ok:
-            return
-        usuario_id = int(item.split(" - ")[0])
-
-        # Selecionar especialidade
-        especialidades = EspecialidadeController.listar_especialidades()
-        if not especialidades:
-            QMessageBox.warning(self, "Aviso", "Nenhuma especialidade cadastrada.")
-            return
-        items = [f"{e.id} - {e.nome}" for e in especialidades]
-        item, ok = QInputDialog.getItem(self, "Selecionar Especialidade", "Especialidade:", items, 0, False)
-        if not ok:
-            return
-        especialidade_id = int(item.split(" - ")[0])
-
-        # Selecionar PDF
-        arquivos = [f for f in os.listdir(PDF_INPUT_FOLDER) if f.endswith(".pdf")]
-        if not arquivos:
-            QMessageBox.warning(self, "Aviso", "Nenhum PDF disponível.")
-            return
-        item, ok = QInputDialog.getItem(self, "Selecionar PDF", "PDF:", arquivos, 0, False)
-        if not ok:
-            return
-        caminho_pdf = os.path.join(PDF_INPUT_FOLDER, item)
-
-        # Selecionar tipos de questões
-        tipos_map = {"Múltipla": "multipla", "Dissertativa": "dissertativa", "Prática": "pratica"}
-        tipo, ok = QInputDialog.getItem(self, "Tipo de Questão", "Escolha tipo de questão:", list(tipos_map.keys()), 0, False)
-        if not ok:
-            return
-        tipo_selecionado = tipos_map[tipo]
-
-        qtd, ok = QInputDialog.getInt(self, "Quantidade", f"Quantas questões de {tipo} gerar?", 1, 1, 50)
-        if not ok:
+        if not hasattr(self, "texto_extraido") or not self.texto_extraido.strip():
+            print("[LOG] Nenhum PDF selecionado ou PDF vazio.")
             return
 
-        # Extrair texto e gerar questões
-        texto = extrair_texto_pdf(caminho_pdf)
-        questoes = gerar_questoes_do_texto(especialidade_id, texto, tipo_selecionado, qtd=qtd)
+        texto = self.texto_extraido
+        tipo = self.tipo_combo.currentText()
+        qtd = self.qtd_spin.value()
+        especialidade_id = self.especialidade_combo.currentData()
 
-        # Gerar prova completa
-        prova = gerar_prova_completa(usuario_id, especialidade_id, questoes)
-        QMessageBox.information(self, "Sucesso", f"Prova gerada!\nPDF: {prova.arquivo_pdf}\nGabarito: {prova.arquivo_gabarito}")
+        # Janela de progresso
+        self.progress_dialog = QDialog(self)
+        self.progress_dialog.setWindowTitle("Gerando questões...")
+        self.progress_dialog.resize(400, 100)
+        layout = QVBoxLayout()
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(qtd)
+        layout.addWidget(QLabel("Gerando questões via IA..."))
+        layout.addWidget(self.progress_bar)
+        self.progress_dialog.setLayout(layout)
+        self.progress_dialog.show()
 
+        # Thread de geração
+        self.thread = GerarQuestaoThread(especialidade_id, texto, tipo, qtd)
+        self.thread.terminado.connect(self.finalizar_geracao)
+        self.thread.start()
 
-# Função para iniciar GUI
-def iniciar_painel():
+    def finalizar_geracao(self, questoes):
+        self.progress_dialog.close()
+        if questoes:
+            usuario_id = 1  # Ajuste conforme o usuário logado
+            especialidade_id = questoes[0].especialidade_id
+            prova = gerar_prova_completa(usuario_id, especialidade_id, questoes)
+            print(f"[LOG] Prova gerada com {len(questoes)} questões. PDF: {prova.arquivo_pdf}")
+        else:
+            print("[LOG] Nenhuma questão foi gerada.")
+
+# -------------------- Executar --------------------
+if __name__ == "__main__":
     app = QApplication(sys.argv)
-    gui = PainelGUI()
-    gui.show()
+    painel = PainelGUI()
+    painel.show()
     sys.exit(app.exec_())

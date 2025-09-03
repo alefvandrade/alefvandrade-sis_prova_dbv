@@ -1,110 +1,67 @@
-# Backend/Services/pdf_generator.py
 import os
-from fpdf import FPDF
-from Backend.Models.prova import Prova
-from Backend.Models.questoes_prova import QuestaoProva  # associação questão x prova
+import configparser
+import requests
+import json
 
-OUTPUT_FOLDER = "Data/Output"
+CONFIG_PATH = os.path.join("config.ini")
+config = configparser.ConfigParser()
+config.read(CONFIG_PATH)
 
-def gerar_doc_prova(prova_id):
+# Lendo configuração
+API_KEY = None
+BASE_URL = "https://api.aimlapi.com/v1"
+MODEL = "lmsys/vicuna-13b-v1.5"
+
+if "VICUNA" in config:
+    API_KEY = config["VICUNA"].get("API_KEY")
+    BASE_URL = config["VICUNA"].get("BASE_URL", BASE_URL)
+    MODEL = config["VICUNA"].get("MODEL", MODEL)
+
+if not API_KEY:
+    print(f"[ERRO] API_KEY não encontrada no {CONFIG_PATH}. Verifique o arquivo config.ini.")
+
+def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
     """
-    Gera PDF da prova e gabarito.
-    Salva arquivos em Data/Output.
+    Gera uma questão via API Vicuna.
+    Retorna um dict {'enunciado': str, 'alternativas': list, 'resposta_correta': str}.
     """
-    if not os.path.exists(OUTPUT_FOLDER):
-        os.makedirs(OUTPUT_FOLDER)
+    if not API_KEY:
+        return {"erro": "API_KEY não configurada."}
 
-    prova = Prova.buscar_por_id(prova_id)
-    questoes_prova = QuestaoProva.listar_por_prova(prova_id)
-
-    # Criar PDF da prova
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"Prova ID: {prova.id}", ln=True)
-    pdf.cell(0, 10, f"Especialidade: {prova.especialidade_id}", ln=True)
-    pdf.ln(10)
-
-    # Escrever questões
-    for qp in questoes_prova:
-        q = qp.questao
-        pdf.set_font("Arial", "B", 12)
-        pdf.multi_cell(0, 8, f"{qp.ordem}. {q.enunciado}")
-        pdf.ln(2)
-        # Se for múltipla, escrever alternativas
-        if hasattr(q, "alternativas") and q.alternativas:
-            for i, alt in enumerate(q.alternativas, start=1):
-                pdf.set_font("Arial", "", 12)
-                pdf.multi_cell(0, 8, f"{chr(64+i)}. {alt}")
-            pdf.ln(2)
-        # Se prática, incluir linha de assinatura
-        if hasattr(q, "tipo") and q.tipo == "pratica":
-            pdf.multi_cell(0, 8, "Ass.: _____________________  Data: ___/___/_____")
-            pdf.ln(4)
-
-    arquivo_pdf = os.path.join(OUTPUT_FOLDER, f"prova_{prova.id}.pdf")
-    pdf.output(arquivo_pdf)
-    prova.arquivo_pdf = arquivo_pdf
-
-    # Criar gabarito
-    pdf_gab = FPDF()
-    pdf_gab.add_page()
-    pdf_gab.set_font("Arial", "B", 16)
-    pdf_gab.cell(0, 10, f"Gabarito Prova ID: {prova.id}", ln=True)
-    pdf_gab.ln(10)
-
-    for qp in questoes_prova:
-        q = qp.questao
-        if hasattr(q, "resposta_correta") and q.resposta_correta:
-            pdf_gab.set_font("Arial", "B", 12)
-            pdf_gab.multi_cell(0, 8, f"{qp.ordem}. {q.resposta_correta}")
-
-    arquivo_gab = os.path.join(OUTPUT_FOLDER, f"gabarito_{prova.id}.pdf")
-    pdf_gab.output(arquivo_gab)
-    prova.arquivo_gabarito = arquivo_gab
-
-    # Salvar caminhos no DB
-    prova.atualizar_arquivos_pdf()
-
-def gerar_questao_ia(tipo, tema, dificuldade="media"):
-    """
-    Gera uma questão usando a API Vicuna via AimlAPI.
-    Retorna dicionário com enunciado, alternativas e resposta correta.
-    """
-    import openai
-    import configparser
-
-    config = configparser.ConfigParser()
-    config.read("Frontend/config.ini")
-
-    API_KEY = config["VICUNA"]["API_KEY"]
-    BASE_URL = config["VICUNA"]["BASE_URL"]
-    MODEL = config["VICUNA"]["MODEL"]
-
-    openai.api_key = API_KEY
-    openai.api_base = BASE_URL
-
-    prompt = f"Crie uma questão do tipo '{tipo}' sobre o tema: {tema}. Dificuldade: {dificuldade}."
-
-    response = openai.ChatCompletion.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": "Você é um assistente que cria questões de prova."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7
-    )
-
-    message = response.choices[0].message.content
-
-    alternativas = None
-    resposta_correta = None
-    if tipo.lower() == "multipla":
-        linhas = message.split("\n")
-        enunciado = linhas[0]
-        alternativas = [l for l in linhas[1:] if l.strip()]
-        resposta_correta = alternativas[0] if alternativas else None
+    # Criar prompt
+    if tipo == "multipla":
+        prompt = f"Crie uma questão de múltipla escolha sobre '{tema}' com dificuldade {dificuldade}. Retorne enunciado, 4 alternativas e a resposta correta."
+    elif tipo == "dissertativa":
+        prompt = f"Crie uma questão dissertativa sobre '{tema}' com dificuldade {dificuldade}. Retorne enunciado."
+    elif tipo == "pratica":
+        prompt = f"Crie uma questão prática sobre '{tema}'. Inclua enunciado e espaço para assinatura e data."
     else:
-        enunciado = message
+        return {"erro": f"Tipo de questão inválido: {tipo}"}
 
-    return {"enunciado": enunciado, "alternativas": alternativas, "resposta_correta": resposta_correta}
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": "Você é um assistente especialista em criar questões de prova."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+
+    try:
+        response = requests.post(f"{BASE_URL}/chat/completions", headers=headers, json=data)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"[IA CLIENT ERROR] Falha na chamada da API: {e}")
+        return {"erro": str(e)}
+
+    try:
+        result = response.json()
+        mensagem = result["choices"][0]["message"]["content"]
+        return {"conteudo": mensagem}
+    except (KeyError, json.JSONDecodeError) as e:
+        print(f"[IA CLIENT ERROR] Erro ao processar resposta da API: {e}")
+        return {"erro": str(e)}
