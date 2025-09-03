@@ -1,73 +1,110 @@
-# Backend/Services/ia_client.py
+# Backend/Services/pdf_generator.py
 import os
-import requests
+from fpdf import FPDF
+from Backend.Models.prova import Prova
+from Backend.Models.questoes_prova import QuestaoProva  # associação questão x prova
 
-class VicunaClient:
+OUTPUT_FOLDER = "Data/Output"
+
+def gerar_doc_prova(prova_id):
     """
-    Cliente central para comunicação com a API da Vicuna.
-    Permite envio de prompts e gerenciamento de autenticação.
+    Gera PDF da prova e gabarito.
+    Salva arquivos em Data/Output.
     """
+    if not os.path.exists(OUTPUT_FOLDER):
+        os.makedirs(OUTPUT_FOLDER)
 
-    def __init__(self, api_key: str = None, base_url: str = None, timeout: int = 30):
-        self.api_key = api_key or os.getenv("VICUNA_API_KEY", "SUA_CHAVE_API_VICUNA")
-        self.base_url = base_url or os.getenv("VICUNA_BASE_URL", "https://api.vicuna.ai/v1")
-        self.timeout = timeout
+    prova = Prova.buscar_por_id(prova_id)
+    questoes_prova = QuestaoProva.listar_por_prova(prova_id)
 
-        if not self.api_key:
-            raise ValueError("Chave de API da Vicuna não encontrada. Defina VICUNA_API_KEY.")
+    # Criar PDF da prova
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, f"Prova ID: {prova.id}", ln=True)
+    pdf.cell(0, 10, f"Especialidade: {prova.especialidade_id}", ln=True)
+    pdf.ln(10)
 
-    def send_prompt(self, prompt: str, max_tokens: int = 500, temperature: float = 0.7) -> dict:
-        """
-        Envia um prompt para a API da Vicuna e retorna a resposta em JSON.
-        """
-        url = f"{self.base_url}/chat/completions"
+    # Escrever questões
+    for qp in questoes_prova:
+        q = qp.questao
+        pdf.set_font("Arial", "B", 12)
+        pdf.multi_cell(0, 8, f"{qp.ordem}. {q.enunciado}")
+        pdf.ln(2)
+        # Se for múltipla, escrever alternativas
+        if hasattr(q, "alternativas") and q.alternativas:
+            for i, alt in enumerate(q.alternativas, start=1):
+                pdf.set_font("Arial", "", 12)
+                pdf.multi_cell(0, 8, f"{chr(64+i)}. {alt}")
+            pdf.ln(2)
+        # Se prática, incluir linha de assinatura
+        if hasattr(q, "tipo") and q.tipo == "pratica":
+            pdf.multi_cell(0, 8, "Ass.: _____________________  Data: ___/___/_____")
+            pdf.ln(4)
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+    arquivo_pdf = os.path.join(OUTPUT_FOLDER, f"prova_{prova.id}.pdf")
+    pdf.output(arquivo_pdf)
+    prova.arquivo_pdf = arquivo_pdf
 
-        payload = {
-            "model": "vicuna-7b",  # pode ser ajustado se precisar
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-            "temperature": temperature
-        }
+    # Criar gabarito
+    pdf_gab = FPDF()
+    pdf_gab.add_page()
+    pdf_gab.set_font("Arial", "B", 16)
+    pdf_gab.cell(0, 10, f"Gabarito Prova ID: {prova.id}", ln=True)
+    pdf_gab.ln(10)
 
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
+    for qp in questoes_prova:
+        q = qp.questao
+        if hasattr(q, "resposta_correta") and q.resposta_correta:
+            pdf_gab.set_font("Arial", "B", 12)
+            pdf_gab.multi_cell(0, 8, f"{qp.ordem}. {q.resposta_correta}")
 
-            # Estrutura esperada da resposta
-            if "choices" in data and len(data["choices"]) > 0:
-                return {
-                    "content": data["choices"][0]["message"]["content"],
-                    "raw": data
-                }
-            else:
-                return {
-                    "error": "Resposta inesperada da API",
-                    "raw": data
-                }
+    arquivo_gab = os.path.join(OUTPUT_FOLDER, f"gabarito_{prova.id}.pdf")
+    pdf_gab.output(arquivo_gab)
+    prova.arquivo_gabarito = arquivo_gab
 
-        except requests.exceptions.RequestException as e:
-            return {"error": str(e)}
+    # Salvar caminhos no DB
+    prova.atualizar_arquivos_pdf()
 
-    def health_check(self) -> bool:
-        """
-        Verifica se a API está acessível.
-        """
-        try:
-            response = requests.get(f"{self.base_url}/health", timeout=5)
-            return response.status_code == 200
-        except Exception:
-            return False
+def gerar_questao_ia(tipo, tema, dificuldade="media"):
+    """
+    Gera uma questão usando a API Vicuna via AimlAPI.
+    Retorna dicionário com enunciado, alternativas e resposta correta.
+    """
+    import openai
+    import configparser
 
+    config = configparser.ConfigParser()
+    config.read("Frontend/config.ini")
 
-# Exemplo de uso isolado
-if __name__ == "__main__":
-    client = VicunaClient()
-    prompt = "Gere uma questão de matemática básica sobre frações, nível fácil."
-    resposta = client.send_prompt(prompt)
-    print(resposta)
+    API_KEY = config["VICUNA"]["API_KEY"]
+    BASE_URL = config["VICUNA"]["BASE_URL"]
+    MODEL = config["VICUNA"]["MODEL"]
+
+    openai.api_key = API_KEY
+    openai.api_base = BASE_URL
+
+    prompt = f"Crie uma questão do tipo '{tipo}' sobre o tema: {tema}. Dificuldade: {dificuldade}."
+
+    response = openai.ChatCompletion.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": "Você é um assistente que cria questões de prova."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.7
+    )
+
+    message = response.choices[0].message.content
+
+    alternativas = None
+    resposta_correta = None
+    if tipo.lower() == "multipla":
+        linhas = message.split("\n")
+        enunciado = linhas[0]
+        alternativas = [l for l in linhas[1:] if l.strip()]
+        resposta_correta = alternativas[0] if alternativas else None
+    else:
+        enunciado = message
+
+    return {"enunciado": enunciado, "alternativas": alternativas, "resposta_correta": resposta_correta}

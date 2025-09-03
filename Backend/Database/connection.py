@@ -1,48 +1,43 @@
+# Backend/Database/connection.py
 import sqlite3
-from sqlite3 import Error
 
 class DatabaseConnection:
-    def __init__(self, db_file="sis_prova_dbv.sqlite"):
-        self.db_file = db_file
+    def __init__(self, db_path="Data/sis_prova_dbv.sqlite"):
+        self.db_path = db_path
         self.conn = None
+        self.cursor = None
 
-    def conectar(self):
-        """Cria uma conexão com o banco de dados SQLite."""
-        try:
-            self.conn = sqlite3.connect(self.db_file)
-            print(f"Conectado ao banco de dados: {self.db_file}")
-            return self.conn
-        except Error as e:
-            print(f"Erro ao conectar ao banco: {e}")
-            return None
+    # ----- Context Manager -----
+    def __enter__(self):
+        self.conn = sqlite3.connect(self.db_path)
+        self.conn.row_factory = sqlite3.Row  # retorna dicionários
+        self.cursor = self.conn.cursor()
+        return self.cursor  # retorna cursor para o 'with'
 
-    def fechar(self):
-        """Fecha a conexão com o banco de dados."""
+    def __exit__(self, exc_type, exc_value, traceback):
         if self.conn:
+            if exc_type is None:
+                self.conn.commit()
+            else:
+                self.conn.rollback()
             self.conn.close()
-            print("Conexão com o banco fechada.")
 
-    def executar(self, sql, params=()):
-        """Executa um comando SQL (INSERT, UPDATE, DELETE)."""
-        if not self.conn:
-            self.conectar()
-        try:
-            cur = self.conn.cursor()
-            cur.execute(sql, params)
-            self.conn.commit()
+    # ----- Métodos auxiliares (opcional) -----
+    def execute(self, query, params=()):
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.cursor()
+            cur.execute(query, params)
+            conn.commit()
             return cur
-        except Error as e:
-            print(f"Erro ao executar SQL: {e}")
-            return None
 
-    def consultar(self, sql, params=()):
-        """Executa uma consulta SQL (SELECT) e retorna os resultados."""
-        if not self.conn:
-            self.conectar()
-        try:
-            cur = self.conn.cursor()
-            cur.execute(sql, params)
+    def fetch_all(self, query, params=()):
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.cursor()
+            cur.execute(query, params)
             return cur.fetchall()
-        except Error as e:
-            print(f"Erro ao consultar SQL: {e}")
-            return None
+
+    def fetch_one(self, query, params=()):
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.cursor()
+            cur.execute(query, params)
+            return cur.fetchone()

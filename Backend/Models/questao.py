@@ -1,48 +1,122 @@
 # Backend/Models/questao.py
+import json
 from Backend.Database.connection import DatabaseConnection
 
 class Questao:
-    def __init__(self, questao_id=None, enunciado=None, especialidade_id=None, prova_id=None):
-        self.id = questao_id
-        self.enunciado = enunciado
+    """
+    Classe base para representar questões.
+    Pode ser especializada em Objetiva, Dissertativa ou Prática.
+    """
+    def __init__(self, especialidade_id: int, enunciado: str, tipo: str = "objetiva",
+                 alternativas: list = None, resposta_correta: str = None,
+                 id: int = None, criado_em: str = None):
+        self.id = id
         self.especialidade_id = especialidade_id
-        self.prova_id = prova_id
-        self.db = DatabaseConnection()
+        self.enunciado = enunciado
+        self.tipo = tipo
+        self.alternativas = alternativas or []
+        self.resposta_correta = resposta_correta
+        self.criado_em = criado_em
 
-    # ------------------ CREATE ------------------
-    def cadastrar(self):
-        sql = "INSERT INTO questoes (enunciado, especialidade_id, prova_id) VALUES (?, ?, ?)"
-        cur = self.db.executar(sql, (self.enunciado, self.especialidade_id, self.prova_id))
-        if cur:
-            self.id = cur.lastrowid
+    # ---------------------------
+    # CRUD
+    # ---------------------------
+
+    def cadastrar(self) -> bool:
+        """
+        Insere a questão no banco de dados.
+        """
+        query = """
+            INSERT INTO questoes (especialidade_id, enunciado, tipo, alternativas, resposta_correta)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        params = (
+            self.especialidade_id,
+            self.enunciado,
+            self.tipo,
+            json.dumps(self.alternativas) if self.alternativas else None,
+            self.resposta_correta
+        )
+
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            conn.commit()
+            self.id = cursor.lastrowid
             return True
-        return False
 
-    # ------------------ READ ------------------
-    def buscar_por_id(self, questao_id):
-        sql = "SELECT id, enunciado, especialidade_id, prova_id FROM questoes WHERE id = ?"
-        result = self.db.consultar(sql, (questao_id,))
-        if result:
-            self.id, self.enunciado, self.especialidade_id, self.prova_id = result[0]
-            return self
+    @staticmethod
+    def buscar_por_id(questao_id: int):
+        query = "SELECT id, especialidade_id, enunciado, tipo, alternativas, resposta_correta, criado_em FROM questoes WHERE id = ?"
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (questao_id,))
+            row = cursor.fetchone()
+
+        if row:
+            return Questao(
+                id=row[0],
+                especialidade_id=row[1],
+                enunciado=row[2],
+                tipo=row[3],
+                alternativas=json.loads(row[4]) if row[4] else [],
+                resposta_correta=row[5],
+                criado_em=row[6]
+            )
         return None
 
-    def listar_todos(self):
-        sql = "SELECT id, enunciado, especialidade_id, prova_id FROM questoes ORDER BY id"
-        return self.db.consultar(sql)
+    @staticmethod
+    def listar_todas() -> list:
+        query = "SELECT id, especialidade_id, enunciado, tipo, alternativas, resposta_correta, criado_em FROM questoes"
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
 
-    # ------------------ UPDATE ------------------
-    def atualizar(self):
-        if not self.id:
-            return False
-        sql = "UPDATE questoes SET enunciado = ?, especialidade_id = ?, prova_id = ? WHERE id = ?"
-        cur = self.db.executar(sql, (self.enunciado, self.especialidade_id, self.prova_id, self.id))
-        return bool(cur)
+        return [
+            Questao(
+                id=row[0],
+                especialidade_id=row[1],
+                enunciado=row[2],
+                tipo=row[3],
+                alternativas=json.loads(row[4]) if row[4] else [],
+                resposta_correta=row[5],
+                criado_em=row[6]
+            )
+            for row in rows
+        ]
 
-    # ------------------ DELETE ------------------
-    def excluir(self):
+    def atualizar(self) -> bool:
         if not self.id:
-            return False
-        sql = "DELETE FROM questoes WHERE id = ?"
-        cur = self.db.executar(sql, (self.id,))
-        return bool(cur)
+            raise ValueError("Questão precisa ter um ID para ser atualizada.")
+
+        query = """
+            UPDATE questoes
+            SET especialidade_id = ?, enunciado = ?, tipo = ?, alternativas = ?, resposta_correta = ?
+            WHERE id = ?
+        """
+        params = (
+            self.especialidade_id,
+            self.enunciado,
+            self.tipo,
+            json.dumps(self.alternativas) if self.alternativas else None,
+            self.resposta_correta,
+            self.id
+        )
+
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def excluir(self) -> bool:
+        if not self.id:
+            raise ValueError("Questão precisa ter um ID para ser excluída.")
+
+        query = "DELETE FROM questoes WHERE id = ?"
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (self.id,))
+            conn.commit()
+            return cursor.rowcount > 0

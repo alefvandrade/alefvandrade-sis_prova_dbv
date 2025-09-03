@@ -1,54 +1,98 @@
+# Backend/Models/especialidade.py
 from Backend.Database.connection import DatabaseConnection
 
 class Especialidade:
-    def __init__(self, codigo=None, nome=None, especialidade_id=None):
-        self.id = especialidade_id
+    """
+    Representa uma especialidade (área de conhecimento).
+    """
+    def __init__(self, codigo: str, nome: str, id: int = None, criado_em: str = None):
+        self.id = id
         self.codigo = codigo
         self.nome = nome
-        self.db = DatabaseConnection()
+        self.criado_em = criado_em
 
-    # ------------------ CREATE ------------------
-    def cadastrar(self):
-        sql = "INSERT INTO especialidades (codigo, nome) VALUES (?, ?)"
-        cur = self.db.executar(sql, (self.codigo, self.nome))
-        if cur:
-            self.id = cur.lastrowid
+    # ---------------------------
+    # CRUD
+    # ---------------------------
+
+    def cadastrar(self) -> bool:
+        """
+        Insere uma nova especialidade no banco de dados.
+        """
+        query = """
+            INSERT INTO especialidades (codigo, nome)
+            VALUES (?, ?)
+        """
+        params = (self.codigo, self.nome)
+
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            conn.commit()
+            self.id = cursor.lastrowid
             return True
-        return False
 
-    # ------------------ READ ------------------
-    def buscar_por_id(self, especialidade_id):
-        sql = "SELECT id, codigo, nome FROM especialidades WHERE id = ?"
-        result = self.db.consultar(sql, (especialidade_id,))
-        if result:
-            self.id, self.codigo, self.nome = result[0]
-            return self
+    @staticmethod
+    def buscar_por_id(especialidade_id: int):
+        """
+        Busca uma especialidade pelo ID.
+        """
+        query = "SELECT id, codigo, nome, criado_em FROM especialidades WHERE id = ?"
+
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (especialidade_id,))
+            row = cursor.fetchone()
+
+        if row:
+            return Especialidade(id=row[0], codigo=row[1], nome=row[2], criado_em=row[3])
         return None
 
-    def buscar_por_codigo(self, codigo):
-        sql = "SELECT id, codigo, nome FROM especialidades WHERE codigo = ?"
-        result = self.db.consultar(sql, (codigo,))
-        if result:
-            self.id, self.codigo, self.nome = result[0]
-            return self
-        return None
+    @staticmethod
+    def listar_todas() -> list:
+        """
+        Lista todas as especialidades cadastradas.
+        """
+        query = "SELECT id, codigo, nome, criado_em FROM especialidades"
 
-    def listar_todos(self):
-        sql = "SELECT id, codigo, nome FROM especialidades ORDER BY nome"
-        return self.db.consultar(sql)
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
 
-    # ------------------ UPDATE ------------------
-    def atualizar(self):
+        return [Especialidade(id=row[0], codigo=row[1], nome=row[2], criado_em=row[3]) for row in rows]
+
+    def atualizar(self) -> bool:
+        """
+        Atualiza uma especialidade existente.
+        """
         if not self.id:
-            return False
-        sql = "UPDATE especialidades SET codigo = ?, nome = ? WHERE id = ?"
-        cur = self.db.executar(sql, (self.codigo, self.nome, self.id))
-        return bool(cur)
+            raise ValueError("Especialidade precisa ter um ID para ser atualizada.")
 
-    # ------------------ DELETE ------------------
-    def excluir(self):
+        query = """
+            UPDATE especialidades
+            SET codigo = ?, nome = ?
+            WHERE id = ?
+        """
+        params = (self.codigo, self.nome, self.id)
+
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def excluir(self) -> bool:
+        """
+        Exclui uma especialidade do banco.
+        """
         if not self.id:
-            return False
-        sql = "DELETE FROM especialidades WHERE id = ?"
-        cur = self.db.executar(sql, (self.id,))
-        return bool(cur)
+            raise ValueError("Especialidade precisa ter um ID para ser excluída.")
+
+        query = "DELETE FROM especialidades WHERE id = ?"
+
+        with DatabaseConnection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (self.id,))
+            conn.commit()
+            return cursor.rowcount > 0
