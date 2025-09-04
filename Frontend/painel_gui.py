@@ -1,4 +1,3 @@
-# Frontend/painel_gui.py
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QComboBox, QSpinBox, QTextEdit, QFileDialog, QMessageBox, QDialog,
@@ -11,8 +10,7 @@ from Backend.Controllers.especialidade_controller import EspecialidadeController
 from Backend.Controllers.prova_controller import ProvaController
 from Backend.Services.questao_service import gerar_questoes_do_texto
 from Backend.Services.prova_service import gerar_prova_completa
-from Backend.Services.pdf_generator import PDFGenerator, extrair_texto_pdf
-
+from Backend.Services.pdf_generator import extrair_texto_pdf  # Remove PDFGenerator
 
 class CadastroDialog(QDialog):
     def __init__(self, parent=None, tipo="usuário"):
@@ -37,7 +35,6 @@ class CadastroDialog(QDialog):
             return {"nome": self.nome_input.text(), "email": ""}  # Pode expandir com email real
         else:
             return {"nome": self.nome_input.text(), "codigo": self.codigo_input.text()}
-
 
 class PainelGUI(QMainWindow):
     def __init__(self):
@@ -184,6 +181,7 @@ class PainelGUI(QMainWindow):
             return
         self.pdf_path = file_path
         try:
+            self.texto_extraido = extrair_texto_pdf(file_path)  # Chama a função diretamente
             self.text_box.setPlainText(self.texto_extraido)
             QMessageBox.information(self, "Sucesso", "Texto do PDF extraído com sucesso!")
             print("[DEBUG] Texto extraído do PDF:", repr(self.texto_extraido[:300]))
