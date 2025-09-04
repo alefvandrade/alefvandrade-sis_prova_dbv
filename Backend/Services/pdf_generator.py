@@ -1,28 +1,31 @@
 # Backend/Services/pdf_generator.py
 import os
+from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from PyPDF2 import PdfReader
 from Backend.Models.prova import Prova
-from Backend.Models.especialidade import Especialidade  # <-- precisamos ter essa model
-from datetime import datetime
+from Backend.Models.especialidade import Especialidade
+
 
 class PDFGenerator:
-    """Gera o PDF da prova a partir das questões."""
+    """Responsável por gerar o PDF da prova a partir das questões."""
 
     def __init__(self, output_dir="data/pdfs"):
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def gerar_pdf(self, prova_id: int, questoes: list):
+    def gerar_pdf(self, prova_id: int, questoes: list) -> str:
         """
-        Gera um PDF da prova com base no ID da prova e lista de questões.
+        Gera o PDF da prova com base no ID da prova e lista de questões.
+        Retorna o caminho do arquivo gerado.
         """
-        # Buscar prova no banco
+        # Buscar prova
         prova = Prova.buscar_por_id(prova_id)
         if not prova:
             raise ValueError(f"Prova com ID {prova_id} não encontrada.")
 
-        # Buscar nome da especialidade associada
+        # Buscar especialidade
         especialidade_nome = None
         try:
             especialidade = Especialidade.buscar_por_id(prova.especialidade_id)
@@ -47,7 +50,8 @@ class PDFGenerator:
         c.drawString(100, altura - 80, titulo)
 
         c.setFont("Helvetica", 12)
-        c.drawString(100, altura - 110, f"Data de Criação: {prova.data_criacao or datetime.now().strftime('%d/%m/%Y')}")
+        c.drawString(100, altura - 110,
+                     f"Data de Criação: {prova.data_criacao or datetime.now().strftime('%d/%m/%Y')}")
 
         # Questões
         y = altura - 160
@@ -61,6 +65,24 @@ class PDFGenerator:
 
         c.save()
 
+        # Atualizar prova com o caminho do PDF
+        prova.arquivo_pdf = caminho_arquivo
+        prova.salvar()
+
         return caminho_arquivo
 
 
+def extrair_texto_pdf(caminho_pdf: str) -> str:
+    """
+    Extrai o texto de um PDF e retorna como string.
+    """
+    try:
+        reader = PdfReader(caminho_pdf)
+        texto = []
+        for pagina in reader.pages:
+            conteudo = pagina.extract_text()
+            if conteudo:
+                texto.append(conteudo)
+        return "\n".join(texto).strip()
+    except Exception as e:
+        raise ValueError(f"Erro ao extrair texto do PDF: {e}")
