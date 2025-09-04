@@ -1,8 +1,8 @@
 import sys
 import os
 import shutil
-from Frontend.painel_gui import PainelGUI
 from PyQt5.QtWidgets import QApplication
+from Frontend.painel_gui import PainelGUI  # Importa a classe PainelGUI do arquivo painel.py
 
 def apagar_pycache(raiz="."):
     """
@@ -18,11 +18,13 @@ def apagar_pycache(raiz="."):
                 print(f"Erro ao apagar {pycache_path}: {e}")
 
 if __name__ == "__main__":
+    # Inicializa a aplicação PyQt5
     app = QApplication(sys.argv)
-    painel = PainelGUI()
+    # Cria a instância da janela principal
+    painel = PainelGUI()  # PainelGUI agora será uma classe PyQt5 (QWidget)
     painel.show()
     
-    # Executa a GUI
+    # Executa a aplicação
     exit_code = app.exec_()
 
     # Após fechar a aplicação, apaga todos os __pycache__

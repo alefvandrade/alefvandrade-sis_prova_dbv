@@ -3,12 +3,33 @@ import fitz  # PyMuPDF
 from fpdf import FPDF
 from pdf2image import convert_from_path
 import pytesseract
-
 from Backend.Controllers.prova_controller import ProvaController
 
-# Configurar manualmente o caminho do executável Tesseract (se não está no PATH)
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Configurar caminho do Poppler automaticamente
+import platform
+if platform.system() == "Windows":
+    poppler_path = r"E:\vs\alefvandrade-sis_prova_dbv\poppler-25.07.0\Library\bin"  # Ajuste para o diretório onde você extraiu o Poppler
+    if not os.path.exists(poppler_path) or not os.path.isfile(os.path.join(poppler_path, "pdftoppm.exe")):
+        print(f"[WARNING] Caminho do Poppler ({poppler_path}) não contém pdftoppm.exe. Verifique a instalação.")
+        poppler_path = None
+    else:
+        print(f"[INFO] Caminho do Poppler verificado: {poppler_path}")
+elif platform.system() == "Linux":
+    poppler_path = "/usr/bin"  # Ajuste conforme instalação
+elif platform.system() == "Darwin":  # macOS
+    poppler_path = "/usr/local/bin"  # Ajuste conforme instalação
+else:
+    poppler_path = None
+    print("[WARNING] Sistema operacional não reconhecido. Configure o caminho do Poppler manualmente.")
 
+if poppler_path and os.path.exists(poppler_path):
+    os.environ["PATH"] += os.pathsep + poppler_path
+    print(f"[INFO] Caminho do Poppler configurado: {poppler_path}")
+else:
+    print("[WARNING] Caminho do Poppler não encontrado ou inválido. OCR pode falhar. Configure manualmente.")
+
+# Configurar manualmente o caminho do executável Tesseract (se não está no PATH)
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Ajuste se necessário
 
 def extrair_texto_pdf(pdf_path):
     """
@@ -19,18 +40,25 @@ def extrair_texto_pdf(pdf_path):
     texto_final = ""
 
     # 1) Tentar extrair texto digital
-    doc = fitz.open(pdf_path)
-    for page in doc:
-        texto_final += page.get_text()
+    try:
+        doc = fitz.open(pdf_path)
+        for page in doc:
+            texto_final += page.get_text()
+    except Exception as e:
+        print(f"[ERROR] Falha ao extrair texto digital: {e}")
 
     if texto_final.strip():  # Se encontrou texto, retorna
         return texto_final
 
     # 2) Se não encontrou, usar OCR
     print("[INFO] Nenhum texto encontrado, usando OCR...")
-    pages = convert_from_path(pdf_path)
-    for page in pages:
-        texto_final += pytesseract.image_to_string(page, lang="por") + "\n"
+    try:
+        pages = convert_from_path(pdf_path)
+        for page in pages:
+            texto_final += pytesseract.image_to_string(page, lang="por") + "\n"
+    except Exception as e:
+        print(f"[ERROR] Falha ao realizar OCR: {e}")
+        raise Exception(f"Erro no OCR: {e}")
 
     return texto_final
 
