@@ -1,166 +1,111 @@
-import sys
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QPushButton, QVBoxLayout, QLabel,
-    QTableWidget, QTableWidgetItem, QComboBox, QSpinBox, QDialog,
-    QProgressBar, QFileDialog
-)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import os
 
-from Backend.Controllers.usuario_controller import UsuarioController
-from Backend.Controllers.especialidade_controller import EspecialidadeController
 from Backend.Services.questao_service import gerar_questoes_do_texto
 from Backend.Services.prova_service import gerar_prova_completa
 from Backend.Services.pdf_generator import extrair_texto_pdf
 
-# -------------------- Janela de Tabela --------------------
-class TabelaDialog(QDialog):
-    def __init__(self, titulo, dados, colunas):
-        super().__init__()
-        self.setWindowTitle(titulo)
-        self.resize(600, 400)
-        layout = QVBoxLayout()
-        self.table = QTableWidget()
-        self.table.setColumnCount(len(colunas))
-        self.table.setHorizontalHeaderLabels(colunas)
-        self.table.setRowCount(len(dados))
 
-        for i, linha in enumerate(dados):
-            for j, valor in enumerate(linha):
-                self.table.setItem(i, j, QTableWidgetItem(str(valor)))
+class PainelGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Sistema de Geração de Provas")
+        self.root.geometry("900x600")
 
-        layout.addWidget(self.table)
-        self.setLayout(layout)
+        self.pdf_path = None
+        self.texto_extraido = ""
 
-# -------------------- Thread de Geração --------------------
-class GerarQuestaoThread(QThread):
-    terminado = pyqtSignal(list)
+        # Frame superior (seleção de PDF e botões principais)
+        frame_top = tk.Frame(root, padx=10, pady=10)
+        frame_top.pack(fill="x")
 
-    def __init__(self, especialidade_id, texto, tipo, qtd):
-        super().__init__()
-        self.especialidade_id = especialidade_id
-        self.texto = texto
-        self.tipo = tipo
-        self.qtd = qtd
+        btn_pdf = tk.Button(frame_top, text="Selecionar PDF", command=self.selecionar_pdf)
+        btn_pdf.pack(side="left", padx=5)
 
-    def run(self):
-        questoes = gerar_questoes_do_texto(self.especialidade_id, self.texto, self.tipo, self.qtd)
-        self.terminado.emit(questoes)
+        btn_gerar = tk.Button(frame_top, text="Gerar Prova", command=self.gerar_prova)
+        btn_gerar.pack(side="left", padx=5)
 
-# -------------------- Janela Principal --------------------
-class PainelGUI(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Sistema de Provas")
-        self.resize(700, 600)
-        layout = QVBoxLayout()
+        btn_sair = tk.Button(frame_top, text="Sair", command=self.root.quit, fg="red")
+        btn_sair.pack(side="right", padx=5)
 
-        # -------------------- Botões Usuários --------------------
-        self.btn_usuarios = QPushButton("Listar Usuários")
-        self.btn_usuarios.clicked.connect(self.listar_usuarios)
-        layout.addWidget(self.btn_usuarios)
+        # Frame para parâmetros da prova
+        frame_params = tk.Frame(root, padx=10, pady=10)
+        frame_params.pack(fill="x")
 
-        self.btn_especialidades = QPushButton("Listar Especialidades")
-        self.btn_especialidades.clicked.connect(self.listar_especialidades)
-        layout.addWidget(self.btn_especialidades)
+        tk.Label(frame_params, text="Usuário ID:").grid(row=0, column=0, sticky="w")
+        self.usuario_entry = tk.Entry(frame_params)
+        self.usuario_entry.grid(row=0, column=1, padx=5)
 
-        # -------------------- Seleção de PDF --------------------
-        self.btn_pdf = QPushButton("Selecionar PDF")
-        self.btn_pdf.clicked.connect(self.selecionar_pdf)
-        layout.addWidget(self.btn_pdf)
+        tk.Label(frame_params, text="Especialidade ID:").grid(row=0, column=2, sticky="w")
+        self.especialidade_entry = tk.Entry(frame_params)
+        self.especialidade_entry.grid(row=0, column=3, padx=5)
 
-        self.caminho_pdf_label = QLabel("Nenhum PDF selecionado")
-        layout.addWidget(self.caminho_pdf_label)
+        tk.Label(frame_params, text="Tipo de Questão:").grid(row=1, column=0, sticky="w")
+        self.tipo_combo = ttk.Combobox(frame_params, values=["objetiva", "dissertativa", "pratica"])
+        self.tipo_combo.grid(row=1, column=1, padx=5)
+        self.tipo_combo.current(0)
 
-        # -------------------- Configuração da Prova --------------------
-        layout.addWidget(QLabel("Tipo de questão:"))
-        self.tipo_combo = QComboBox()
-        self.tipo_combo.addItems(["multipla", "dissertativa", "pratica"])
-        layout.addWidget(self.tipo_combo)
+        tk.Label(frame_params, text="Quantidade de Questões:").grid(row=1, column=2, sticky="w")
+        self.qtd_spin = tk.Spinbox(frame_params, from_=1, to=50, width=5)
+        self.qtd_spin.grid(row=1, column=3, padx=5)
 
-        layout.addWidget(QLabel("Quantidade de questões:"))
-        self.qtd_spin = QSpinBox()
-        self.qtd_spin.setMinimum(1)
-        self.qtd_spin.setMaximum(20)
-        layout.addWidget(self.qtd_spin)
+        # Frame para exibir texto do PDF
+        frame_texto = tk.LabelFrame(root, text="Texto do PDF", padx=10, pady=10)
+        frame_texto.pack(fill="both", expand=True, padx=10, pady=10)
 
-        layout.addWidget(QLabel("Especialidade:"))
-        self.especialidade_combo = QComboBox()
-        self.atualizar_combo_especialidades()
-        layout.addWidget(self.especialidade_combo)
-
-        self.btn_gerar = QPushButton("Gerar Prova")
-        self.btn_gerar.clicked.connect(self.gerar_prova)
-        layout.addWidget(self.btn_gerar)
-
-        self.setLayout(layout)
-
-    # -------------------- Funções --------------------
-    def listar_usuarios(self):
-        dados = []
-        for u in UsuarioController.listar_usuarios():
-            dados.append([u.id, u.nome, u.email, u.criado_em])
-        dialog = TabelaDialog("Usuários", dados, ["ID", "Nome", "Email", "Criado em"])
-        dialog.exec_()
-
-    def listar_especialidades(self):
-        dados = []
-        for e in EspecialidadeController.listar_especialidades():
-            dados.append([e.id, e.codigo, e.nome, e.criado_em])
-        dialog = TabelaDialog("Especialidades", dados, ["ID", "Código", "Nome", "Criado em"])
-        dialog.exec_()
-
-    def atualizar_combo_especialidades(self):
-        self.especialidade_combo.clear()
-        for e in EspecialidadeController.listar_especialidades():
-            self.especialidade_combo.addItem(f"{e.nome} ({e.id})", e.id)
+        self.text_box = tk.Text(frame_texto, wrap="word", state="disabled")
+        self.text_box.pack(fill="both", expand=True)
 
     def selecionar_pdf(self):
-        caminho, _ = QFileDialog.getOpenFileName(self, "Selecione o PDF", "Data/Input/", "PDF Files (*.pdf)")
-        if caminho:
-            self.caminho_pdf_label.setText(caminho)
-            self.texto_extraido = extrair_texto_pdf(caminho)
-            print("[LOG] PDF carregado e texto extraído.")
-
-    def gerar_prova(self):
-        if not hasattr(self, "texto_extraido") or not self.texto_extraido.strip():
-            print("[LOG] Nenhum PDF selecionado ou PDF vazio.")
+        """Seleciona um PDF e extrai o texto automaticamente."""
+        file_path = filedialog.askopenfilename(
+            title="Selecione um arquivo PDF",
+            filetypes=[("Arquivos PDF", "*.pdf")]
+        )
+        if not file_path:
             return
 
-        texto = self.texto_extraido
-        tipo = self.tipo_combo.currentText()
-        qtd = self.qtd_spin.value()
-        especialidade_id = self.especialidade_combo.currentData()
+        self.pdf_path = file_path
+        try:
+            self.texto_extraido = extrair_texto_pdf(file_path)
+            self._atualizar_texto_box(self.texto_extraido)
+            messagebox.showinfo("Sucesso", "Texto do PDF extraído com sucesso!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao extrair texto do PDF:\n{e}")
 
-        # Janela de progresso
-        self.progress_dialog = QDialog(self)
-        self.progress_dialog.setWindowTitle("Gerando questões...")
-        self.progress_dialog.resize(400, 100)
-        layout = QVBoxLayout()
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximum(qtd)
-        layout.addWidget(QLabel("Gerando questões via IA..."))
-        layout.addWidget(self.progress_bar)
-        self.progress_dialog.setLayout(layout)
-        self.progress_dialog.show()
+    def gerar_prova(self):
+        """Gera a prova a partir do texto extraído do PDF."""
+        if not self.texto_extraido.strip():
+            messagebox.showwarning("Aviso", "Nenhum texto foi extraído do PDF.")
+            return
 
-        # Thread de geração
-        self.thread = GerarQuestaoThread(especialidade_id, texto, tipo, qtd)
-        self.thread.terminado.connect(self.finalizar_geracao)
-        self.thread.start()
+        try:
+            usuario_id = int(self.usuario_entry.get())
+            especialidade_id = int(self.especialidade_entry.get())
+            tipo = self.tipo_combo.get()
+            qtd = int(self.qtd_spin.get())
 
-    def finalizar_geracao(self, questoes):
-        self.progress_dialog.close()
-        if questoes:
-            usuario_id = 1  # Ajuste conforme o usuário logado
-            especialidade_id = questoes[0].especialidade_id
+            questoes = []
+            for i in range(qtd):
+                q = gerar_questoes_do_texto(especialidade_id, self.texto_extraido, tipo, qtd=1)
+                questoes.extend(q)
+                print(f"[LOG] Questão {i+1} gerada")
+
             prova = gerar_prova_completa(usuario_id, especialidade_id, questoes)
-            print(f"[LOG] Prova gerada com {len(questoes)} questões. PDF: {prova.arquivo_pdf}")
-        else:
-            print("[LOG] Nenhuma questão foi gerada.")
+            messagebox.showinfo("Sucesso", f"Prova gerada com sucesso!\nArquivo: {prova.arquivo_pdf}")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao gerar a prova:\n{e}")
 
-# -------------------- Executar --------------------
+    def _atualizar_texto_box(self, texto):
+        """Atualiza a caixa de texto do PDF exibido."""
+        self.text_box.config(state="normal")
+        self.text_box.delete("1.0", tk.END)
+        self.text_box.insert(tk.END, texto)
+        self.text_box.config(state="disabled")
+
+
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    painel = PainelGUI()
-    painel.show()
-    sys.exit(app.exec_())
+    root = tk.Tk()
+    app = PainelGUI(root)
+    root.mainloop()
