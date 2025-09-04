@@ -1,137 +1,65 @@
+# Backend/Services/pdf_generator.py
 import os
-import fitz  # PyMuPDF
-from fpdf import FPDF
-from pdf2image import convert_from_path
-import pytesseract
-from Backend.Controllers.prova_controller import ProvaController
-
-# Configurar caminho do Poppler automaticamente
-import platform
-if platform.system() == "Windows":
-    poppler_path = r"E:\vs\alefvandrade-sis_prova_dbv\poppler-25.07.0\Library\bin"  # Ajuste para o diretório onde você extraiu o Poppler
-    if not os.path.exists(poppler_path) or not os.path.isfile(os.path.join(poppler_path, "pdftoppm.exe")):
-        print(f"[WARNING] Caminho do Poppler ({poppler_path}) não contém pdftoppm.exe. Verifique a instalação.")
-        poppler_path = None
-    else:
-        print(f"[INFO] Caminho do Poppler verificado: {poppler_path}")
-elif platform.system() == "Linux":
-    poppler_path = "/usr/bin"  # Ajuste conforme instalação
-elif platform.system() == "Darwin":  # macOS
-    poppler_path = "/usr/local/bin"  # Ajuste conforme instalação
-else:
-    poppler_path = None
-    print("[WARNING] Sistema operacional não reconhecido. Configure o caminho do Poppler manualmente.")
-
-if poppler_path and os.path.exists(poppler_path):
-    os.environ["PATH"] += os.pathsep + poppler_path
-    print(f"[INFO] Caminho do Poppler configurado: {poppler_path}")
-else:
-    print("[WARNING] Caminho do Poppler não encontrado ou inválido. OCR pode falhar. Configure manualmente.")
-
-# Configurar manualmente o caminho do executável Tesseract (se não está no PATH)
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Ajuste se necessário
-
-def extrair_texto_pdf(pdf_path):
-    """
-    Extrai texto de um PDF.
-    - Primeiro tenta extrair texto digital (PDF pesquisável).
-    - Se não encontrar texto, faz OCR página por página.
-    """
-    texto_final = ""
-
-    # 1) Tentar extrair texto digital
-    try:
-        doc = fitz.open(pdf_path)
-        for page in doc:
-            texto_final += page.get_text()
-    except Exception as e:
-        print(f"[ERROR] Falha ao extrair texto digital: {e}")
-
-    if texto_final.strip():  # Se encontrou texto, retorna
-        return texto_final
-
-    # 2) Se não encontrou, usar OCR
-    print("[INFO] Nenhum texto encontrado, usando OCR...")
-    try:
-        pages = convert_from_path(pdf_path)
-        for page in pages:
-            texto_final += pytesseract.image_to_string(page, lang="por") + "\n"
-    except Exception as e:
-        print(f"[ERROR] Falha ao realizar OCR: {e}")
-        raise Exception(f"Erro no OCR: {e}")
-
-    return texto_final
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from Backend.Models.prova import Prova
+from Backend.Models.especialidade import Especialidade  # <-- precisamos ter essa model
+from datetime import datetime
 
 
-def gerar_doc_prova(prova_id):
-    """
-    Gera o PDF da prova a partir do ID da prova e suas questões.
-    """
-    prova = ProvaController.buscar_prova(prova_id)
-    if not prova:
-        raise ValueError(f"Prova com ID {prova_id} não encontrada.")
+class PDFGenerator:
+    """Gera o PDF da prova a partir das questões."""
 
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(200, 10, f"Prova: {prova.nome}", ln=True, align="C")
-    pdf.ln(10)
+    def __init__(self, output_dir="data/pdfs"):
+        self.output_dir = output_dir
+        os.makedirs(self.output_dir, exist_ok=True)
 
-    # Buscar questões relacionadas
-    questoes = ProvaController.listar_questoes(prova.id)
+    def gerar_pdf(self, prova_id: int, questoes: list):
+        """
+        Gera um PDF da prova com base no ID da prova e lista de questões.
+        """
+        # Buscar prova no banco
+        prova = Prova.buscar_por_id(prova_id)
+        if not prova:
+            raise ValueError(f"Prova com ID {prova_id} não encontrada.")
 
-    pdf.set_font("Arial", "", 12)
-    for i, q in enumerate(questoes, start=1):
-        pdf.multi_cell(0, 10, f"{i}) {q.enunciado}")
-        if q.tipo == "objetiva" and q.alternativas:
-            alternativas = eval(q.alternativas)  # armazenadas como JSON string
-            for letra, alt in zip("ABCDE", alternativas):
-                pdf.multi_cell(0, 10, f"   {letra}) {alt}")
-        elif q.tipo == "pratica":
-            pdf.ln(5)
-            pdf.multi_cell(0, 10, "Ass.: _______________________   Data: ____/____/________")
-        pdf.ln(8)
+        # Buscar nome da especialidade associada
+        especialidade_nome = None
+        try:
+            especialidade = Especialidade.buscar_por_id(prova.especialidade_id)
+            if especialidade:
+                especialidade_nome = especialidade.nome
+        except Exception:
+            especialidade_nome = f"Especialidade {prova.especialidade_id}"
 
-    # Salvar arquivo
-    output_dir = "Data/Output"
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"prova_{prova.id}.pdf")
-    pdf.output(output_path)
+        # Nome do arquivo
+        nome_arquivo = f"prova_{prova.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        caminho_arquivo = os.path.join(self.output_dir, nome_arquivo)
 
-    # Atualizar caminho no banco
-    prova.arquivo_pdf = output_path
-    prova.atualizar()
-    return output_path
+        # Criar PDF
+        c = canvas.Canvas(caminho_arquivo, pagesize=A4)
+        largura, altura = A4
 
+        # Cabeçalho
+        c.setFont("Helvetica-Bold", 16)
+        titulo = f"Prova {prova.id}"
+        if especialidade_nome:
+            titulo += f" - {especialidade_nome}"
+        c.drawString(100, altura - 80, titulo)
 
-def gerar_gabarito(prova_id):
-    """
-    Gera o gabarito separado da prova.
-    """
-    prova = ProvaController.buscar_prova(prova_id)
-    if not prova:
-        raise ValueError(f"Prova com ID {prova_id} não encontrada.")
+        c.setFont("Helvetica", 12)
+        c.drawString(100, altura - 110, f"Data de Criação: {prova.data_criacao or datetime.now().strftime('%d/%m/%Y')}")
 
-    questoes = ProvaController.listar_questoes(prova.id)
+        # Questões
+        y = altura - 160
+        for i, questao in enumerate(questoes, start=1):
+            texto = f"{i}) {questao.enunciado}"
+            c.drawString(80, y, texto)
+            y -= 40
+            if y < 100:
+                c.showPage()
+                y = altura - 80
 
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(200, 10, f"Gabarito - {prova.nome}", ln=True, align="C")
-    pdf.ln(10)
+        c.save()
 
-    pdf.set_font("Arial", "", 12)
-    for i, q in enumerate(questoes, start=1):
-        resposta = q.resposta_correta if q.resposta_correta else "—"
-        pdf.multi_cell(0, 10, f"{i}) {resposta}")
-
-    # Salvar arquivo
-    output_dir = "Data/Output"
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"gabarito_{prova.id}.pdf")
-    pdf.output(output_path)
-
-    # Atualizar caminho no banco
-    prova.arquivo_gabarito = output_path
-    prova.atualizar()
-    return output_path
+        return caminho_arquivo

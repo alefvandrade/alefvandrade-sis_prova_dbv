@@ -1,3 +1,4 @@
+# ia_client.py
 import os
 import configparser
 import requests
@@ -11,7 +12,7 @@ config.read(CONFIG_PATH)
 # Lendo configuração
 API_KEY = None
 BASE_URL = "https://api.aimlapi.com/v1"
-MODEL = "lmsys/vicuna-13b-v1.5"
+MODEL = "gpt-3.5-turbo"
 
 if "VICUNA" in config:
     API_KEY = config["VICUNA"].get("API_KEY")
@@ -24,7 +25,7 @@ if not API_KEY:
 
 def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
     """
-    Gera uma questão via API Vicuna no formato JSON estruturado.
+    Gera uma questão via API (chat ou completion) no formato JSON estruturado.
     Retorna dict conforme o tipo de questão.
     """
     if not API_KEY:
@@ -70,17 +71,30 @@ def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
         "Content-Type": "application/json"
     }
 
-    data = {
-        "model": MODEL,
-        "messages": [
-            {"role": "system", "content": "Você é um gerador de questões de prova. Responda sempre em JSON válido."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.7
-    }
+    # Detecta automaticamente se é modelo de chat ou completion
+    is_chat_model = any(m in MODEL for m in ["gpt", "chat", "turbo", "4o", "claude"])
+
+    if is_chat_model:
+        endpoint = f"{BASE_URL}/chat/completions"
+        data = {
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": "Você é um gerador de questões de prova. Responda sempre em JSON válido."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7
+        }
+    else:
+        endpoint = f"{BASE_URL}/completions"
+        data = {
+            "model": MODEL,
+            "prompt": prompt,
+            "max_tokens": 512,
+            "temperature": 0.7
+        }
 
     try:
-        response = requests.post(f"{BASE_URL}/chat/completions", headers=headers, json=data)
+        response = requests.post(endpoint, headers=headers, json=data)
         response.raise_for_status()
     except requests.RequestException as e:
         print(f"[IA CLIENT ERROR] Falha na chamada da API: {e}")
@@ -88,7 +102,12 @@ def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
 
     try:
         result = response.json()
-        mensagem = result["choices"][0]["message"]["content"].strip()
+
+        # Extrai texto dependendo do tipo de modelo
+        if is_chat_model:
+            mensagem = result["choices"][0]["message"]["content"].strip()
+        else:
+            mensagem = result["choices"][0]["text"].strip()
 
         # Debug bruto
         print("\n[DEBUG IA RAW RESPONSE]:")
