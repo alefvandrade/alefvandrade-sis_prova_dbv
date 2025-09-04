@@ -4,7 +4,7 @@ class ProvaController:
     @staticmethod
     def criar_prova(usuario_id, especialidade_id):
         # Lógica existente para criar prova
-        prova = Prova(usuario_id=usuario_id, especialidade_id=especialidade_id)
+        prova = Prova(usuario_id=usuario_id, especialidade_id=especialidade_id, nome=f"Prova - Especialidade {especialidade_id}")
         prova.cadastrar()  # Usando o método cadastrar da classe Prova
         return prova
 

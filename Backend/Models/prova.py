@@ -10,13 +10,14 @@ class Prova:
     """
     def __init__(self, usuario_id: int, especialidade_id: int,
                  arquivo_pdf: str = None, arquivo_gabarito: str = None,
-                 id: int = None, data_criacao: str = None):
+                 id: int = None, data_criacao: str = None, nome: str = None):
         self.id = id
         self.usuario_id = usuario_id
         self.especialidade_id = especialidade_id
         self.arquivo_pdf = arquivo_pdf
         self.arquivo_gabarito = arquivo_gabarito
         self.data_criacao = data_criacao
+        self.nome = nome  # Adicionado o atributo nome
 
     # ---------------------------
     # CRUD Prova
@@ -24,10 +25,10 @@ class Prova:
 
     def cadastrar(self) -> bool:
         query = """
-            INSERT INTO provas (usuario_id, especialidade_id, arquivo_pdf, arquivo_gabarito)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO provas (usuario_id, especialidade_id, nome, arquivo_pdf, arquivo_gabarito)
+            VALUES (?, ?, ?, ?, ?)
         """
-        params = (self.usuario_id, self.especialidade_id, self.arquivo_pdf, self.arquivo_gabarito)
+        params = (self.usuario_id, self.especialidade_id, self.nome, self.arquivo_pdf, self.arquivo_gabarito)
 
         with DatabaseConnection() as conn:
             cursor = conn.cursor()
@@ -38,7 +39,7 @@ class Prova:
 
     @staticmethod
     def buscar_por_id(prova_id: int):
-        query = "SELECT id, usuario_id, especialidade_id, data_criacao, arquivo_pdf, arquivo_gabarito FROM provas WHERE id = ?"
+        query = "SELECT id, usuario_id, especialidade_id, nome, data_criacao, arquivo_pdf, arquivo_gabarito FROM provas WHERE id = ?"
         with DatabaseConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(query, (prova_id,))
@@ -49,15 +50,16 @@ class Prova:
                 id=row[0],
                 usuario_id=row[1],
                 especialidade_id=row[2],
-                data_criacao=row[3],
-                arquivo_pdf=row[4],
-                arquivo_gabarito=row[5]
+                nome=row[3],  # Adicionado o campo nome
+                data_criacao=row[4],
+                arquivo_pdf=row[5],
+                arquivo_gabarito=row[6]
             )
         return None
 
     @staticmethod
     def listar_todas() -> list:
-        query = "SELECT id, usuario_id, especialidade_id, data_criacao, arquivo_pdf, arquivo_gabarito FROM provas"
+        query = "SELECT id, usuario_id, especialidade_id, nome, data_criacao, arquivo_pdf, arquivo_gabarito FROM provas"
         with DatabaseConnection() as conn:
             cursor = conn.cursor()
             cursor.execute(query)
@@ -68,9 +70,10 @@ class Prova:
                 id=row[0],
                 usuario_id=row[1],
                 especialidade_id=row[2],
-                data_criacao=row[3],
-                arquivo_pdf=row[4],
-                arquivo_gabarito=row[5]
+                nome=row[3],  # Adicionado o campo nome
+                data_criacao=row[4],
+                arquivo_pdf=row[5],
+                arquivo_gabarito=row[6]
             )
             for row in rows
         ]
@@ -81,10 +84,10 @@ class Prova:
 
         query = """
             UPDATE provas
-            SET usuario_id = ?, especialidade_id = ?, arquivo_pdf = ?, arquivo_gabarito = ?
+            SET usuario_id = ?, especialidade_id = ?, nome = ?, arquivo_pdf = ?, arquivo_gabarito = ?
             WHERE id = ?
         """
-        params = (self.usuario_id, self.especialidade_id, self.arquivo_pdf, self.arquivo_gabarito, self.id)
+        params = (self.usuario_id, self.especialidade_id, self.nome, self.arquivo_pdf, self.arquivo_gabarito, self.id)
 
         with DatabaseConnection() as conn:
             cursor = conn.cursor()

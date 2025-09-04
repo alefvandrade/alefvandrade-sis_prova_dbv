@@ -11,8 +11,8 @@ config.read(CONFIG_PATH)
 
 # Lendo configuração
 API_KEY = None
-BASE_URL = "https://api.aimlapi.com/v1"
-MODEL = "gpt-3.5-turbo"
+BASE_URL = "https://api.aimlapi.com/v1"  # Padrão seguro
+MODEL = "gpt-3.5-turbo"  # Padrão seguro, ajuste se necessário
 
 if "VICUNA" in config:
     API_KEY = config["VICUNA"].get("API_KEY")
@@ -21,7 +21,9 @@ if "VICUNA" in config:
 
 if not API_KEY:
     print(f"[ERRO] API_KEY não encontrada no {CONFIG_PATH}. Verifique o arquivo config.ini.")
-
+    exit(1)
+else:
+    print(f"[DEBUG] API_KEY configurada. BASE_URL: {BASE_URL}, MODEL: {MODEL}")
 
 def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
     """
@@ -72,7 +74,7 @@ def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
     }
 
     # Detecta automaticamente se é modelo de chat ou completion
-    is_chat_model = any(m in MODEL for m in ["gpt", "chat", "turbo", "4o", "claude"])
+    is_chat_model = any(m in MODEL.lower() for m in ["gpt", "chat", "turbo", "4o", "claude", "vicuna"])
 
     if is_chat_model:
         endpoint = f"{BASE_URL}/chat/completions"
@@ -82,7 +84,8 @@ def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
                 {"role": "system", "content": "Você é um gerador de questões de prova. Responda sempre em JSON válido."},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.7
+            "temperature": 0.7,
+            "max_tokens": 512
         }
     else:
         endpoint = f"{BASE_URL}/completions"
@@ -93,15 +96,16 @@ def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
             "temperature": 0.7
         }
 
-    try:
-        response = requests.post(endpoint, headers=headers, json=data)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"[IA CLIENT ERROR] Falha na chamada da API: {e}")
-        return {"erro": str(e)}
+    print(f"[DEBUG] Endpoint: {endpoint}")
+    print(f"[DEBUG] Payload: {json.dumps(data)}")
 
     try:
+        response = requests.post(endpoint, headers=headers, json=data, timeout=30)
+        response.raise_for_status()  # Levanta exceção para códigos de erro HTTP
         result = response.json()
+
+        print(f"[DEBUG] Response Status: {response.status_code}")
+        print(f"[DEBUG] Full Response: {json.dumps(result, indent=2)}")
 
         # Extrai texto dependendo do tipo de modelo
         if is_chat_model:
@@ -109,18 +113,25 @@ def gerar_questao_ia(tipo: str, tema: str, dificuldade="media") -> dict:
         else:
             mensagem = result["choices"][0]["text"].strip()
 
-        # Debug bruto
         print("\n[DEBUG IA RAW RESPONSE]:")
         print(mensagem)
         print("------------------------------------------------\n")
 
-        # Força JSON válido (remove trechos extras caso venham em ```json ... ```)
         if mensagem.startswith("```"):
-            mensagem = mensagem.strip("```json").strip("```")
+            mensagem = mensagem.strip("```json)").strip("```").strip()
 
         dados = json.loads(mensagem)
         return dados
 
+    except requests.RequestException as e:
+        error_msg = f"Falha na chamada da API: {e} (Status: {getattr(e.response, 'status_code', 'N/A')})"
+        print(f"[IA CLIENT ERROR] {error_msg}")
+        return {"erro": error_msg}
     except (KeyError, json.JSONDecodeError) as e:
-        print(f"[IA CLIENT ERROR] Erro ao processar resposta da API: {e}")
-        return {"erro": str(e)}
+        error_msg = f"Erro ao processar resposta da API: {e}"
+        print(f"[IA CLIENT ERROR] {error_msg}")
+        return {"erro": error_msg}
+    except Exception as e:
+        error_msg = f"Erro inesperado: {e}"
+        print(f"[IA CLIENT ERROR] {error_msg}")
+        return {"erro": error_msg}
