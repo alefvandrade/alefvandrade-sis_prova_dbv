@@ -6,7 +6,6 @@ from Backend.Models.prova import Prova
 from Backend.Models.especialidade import Especialidade  # <-- precisamos ter essa model
 from datetime import datetime
 
-
 class PDFGenerator:
     """Gera o PDF da prova a partir das questões."""
 
@@ -63,3 +62,5 @@ class PDFGenerator:
         c.save()
 
         return caminho_arquivo
+
+
