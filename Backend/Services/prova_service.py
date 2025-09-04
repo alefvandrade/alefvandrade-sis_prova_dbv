@@ -2,11 +2,6 @@ from Backend.Controllers.prova_controller import ProvaController
 from Backend.Services.pdf_generator import PDFGenerator
 from Backend.Models.questao import Questao
 
-# Instanciar a classe
-pdf_generator = PDFGenerator()
-
-# Usar o método gerar_pdf
-pdf_generator.gerar_pdf(prova_id, questoes)
 
 def gerar_prova_completa(usuario_id, especialidade_id, questoes):
     """
@@ -15,11 +10,15 @@ def gerar_prova_completa(usuario_id, especialidade_id, questoes):
     # Criar prova
     prova = ProvaController.criar_prova(usuario_id, especialidade_id)
 
-    # Associar questões
+    # Associar questões à prova
     for ordem, q in enumerate(questoes, start=1):
         Questao.associar_com_prova(q.id, prova.id, ordem)
 
-    # Gerar PDF e gabarito
-    PDFGenerator(prova.id)
+    # Gerar PDF
+    pdf_generator = PDFGenerator()
+    pdf_path = pdf_generator.gerar_pdf(prova.id, questoes)
 
-    return prova
+    return {
+        "prova": prova,
+        "pdf_path": pdf_path
+    }
