@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS questoes (
 CREATE TABLE IF NOT EXISTS provas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     usuario_id INTEGER NOT NULL,
+    nome TEXT
     especialidade_id INTEGER NOT NULL,
     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     arquivo_pdf TEXT,
@@ -58,5 +59,3 @@ BEGIN
     SET criado_em = CURRENT_TIMESTAMP
     WHERE id = NEW.id;
 END;
-
-ALTER TABLE provas ADD COLUMN nome TEXT;
